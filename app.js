@@ -3,7 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser')
 const db = require('./database/db-setting');
+const bcrypt = require('bcrypt');
 
 const app = express();
 
@@ -14,10 +16,12 @@ const corsOptions = {
   ],
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 };
 
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
+app.use(cookieParser())
 
 function authMiddleware(req, res, next) {
   // get token and check if it's exist
@@ -33,7 +37,7 @@ app.get('/', (req, res) => {
   res.send('fukc you')
 })
 
-app.get ('/:id', async (req, res) => {
+app.get ('/member/:id', async (req, res) => {
   const output = {
     success: false,
     error: '沒有這名會員',
@@ -62,12 +66,15 @@ app.post("/register", async (req, res) => {
     data: [],
   }
   const sql = 'INSERT INTO `members`(`account`, `password`, `name`) VALUES (?, ?, ?)';
+
   try {
-    console.log(req.body)
+    const {account, password, name} = req.body
+    // 密碼加密
+    const hash = await bcrypt.hash(password, 10);  
     const [results, fields] = await db.query(sql, [
-      req.body.account,
-      req.body.password,
-      req.body.name,
+      account,
+      hash,
+      name,
     ])
 
     output.success = true;
@@ -79,21 +86,50 @@ app.post("/register", async (req, res) => {
   res.json(output);
 })
 
-app.post('/login', (req, res) => {
-  console.log(req.body);
-  const userName = req.body.name;
-  const token = jwt.sign({name: userName}, process.env.JWT_TOKEN_SECRET, { expiresIn: '1h' })
-  res.status(201).json({
-    status: 'success',
-    token,
-    data: {
-      name: 'uerName'
+app.post('/login', async (req, res) => {
+  const output = {
+    success: false,
+    error: '',
+    data: []
+  }
+  const {account, password} = req.body;
+  const sql = "SELECT * FROM `members` WHERE `account` = ?"
+
+  try {
+    const [results] = await db.query(sql, [account]);
+    const {id, name, password: hash} = results[0]
+    if (results.length === 0) {
+      output.error = '帳號或密碼錯誤'
+      return res.status(401).json(output);
+    } 
+    // 檢查密碼
+    const checkSamePwd = await bcrypt.compare(password, hash);
+
+    if (!checkSamePwd) {
+      output.error = '帳號或密碼錯誤'
+      return res.status(401).json(output);
     }
-  })
+
+    const token = jwt.sign({name, id}, process.env.JWT_TOKEN_SECRET, { expiresIn: '1h' });
+
+    output.success = true;
+    res
+      .status(201)
+      .cookie('authToken', token, {httpOnly: true,expires: new Date(Date.now() + 8 * 3600000)})
+      .json(output)
+  }
+  catch (err) {
+    console.log('errorrrr',err)
+  }
 })
 
 app.post('/', (req, res) => {
   res.send('you can post fukc you')
+})
+
+app.get('/member', (req, res) => {
+  console.log('aa',req.cookies?.authToken)
+  res.send('yoyo')
 })
 
 const port = 4000;
