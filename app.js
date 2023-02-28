@@ -72,32 +72,57 @@ app.post("/register", async (req, res) => {
     error: '',
     data: [],
   }
-  const sql = 'INSERT INTO `members`(`account`, `password`, `name`) VALUES (?, ?, ?)';
-
+  const addMemeberSql = 'INSERT INTO `members`(`account`, `password`, `name`) VALUES (?, ?, ?)';
+ 
   try {
-    const {account, password, name} = req.body
+    const {account, password, name} = req.body;
+    // 若傳來的格式不對或讀不到值就 return
+    if (account === undefined || password === undefined || name === undefined) {
+      output.error = '前端傳來的資料部分錯誤'
+      res.status(400).json(output)
+      return;
+    }
+     // 先確認此信箱是否已註冊過
+    const memberSql = 'SELECT `account` FROM `members` WHERE `account` = ' + '"' + account + '"';
+    const [member, memberFields] = await db.query(memberSql);
+
+    if (member.length !== 0) {
+      output.error = '此信箱已註冊過';
+      res.status(400).json(output);
+      return;
+    }
+
     // 密碼加密
     const hash = await bcrypt.hash(password, 10);  
-    const [results, fields] = await db.query(sql, [
+    const [results, fields] = await db.query(addMemeberSql, [
       account,
       hash,
       name,
-    ])
+    ]);
+
+    // 準備給前端的 token
+    const token = jwt.sign({name, id: results.insertId}, process.env.JWT_TOKEN_SECRET, { expiresIn: '1h' });
 
     output.success = true;
     output.data = results;
+
+    res
+    .status(201)
+    .cookie('authToken', token, {httpOnly: true,expires: new Date(Date.now() + 8 * 3600000)})
+    .json(output);
   }
   catch (err) {
-    console.log(err)
+    console.log(err);
+    res
+    .status(400)
   }
-  res.json(output);
 })
 
 app.post('/login', async (req, res) => {
   const output = {
     success: false,
     error: '',
-    data: []
+    data: {},
   }
   const {account, password} = req.body;
   const sql = "SELECT * FROM `members` WHERE `account` = ?"
@@ -117,9 +142,11 @@ app.post('/login', async (req, res) => {
       return res.status(401).json(output);
     }
 
-    const token = jwt.sign({name, id}, process.env.JWT_TOKEN_SECRET, { expiresIn: '1h' });
+    // 2/28 先不設下過期日
+    const token = jwt.sign({name, id}, process.env.JWT_TOKEN_SECRET);
 
     output.success = true;
+    output.data.authToken = token;
     res
       .status(201)
       .cookie('authToken', token, {httpOnly: true,expires: new Date(Date.now() + 8 * 3600000)})
@@ -203,7 +230,7 @@ app.post('/', (req, res) => {
 
 app.get('/member', (req, res) => {
   console.log('aa',req.cookies?.authToken)
-  res.send('yoyo')
+  res.json({email: 'eee@gmail.com', password: '123455'})
 })
 
 const port = 4000;
